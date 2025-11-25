@@ -1,434 +1,486 @@
-<!doctype html>
-<html lang="id">
+<!DOCTYPE html>
+<html lang="en">
+
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Knight's Tour 5×5 — Clustered Generator & Viewer</title>
-
-  <!-- Bootstrap CSS -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
-  <style>
-    body { padding: 20px; }
-    .grid { display: grid; grid-template-columns: repeat(5, 56px); gap:6px; }
-    .cell { width:56px; height:56px; display:flex; align-items:center; justify-content:center;
-           border:1px solid #666; border-radius:6px; font-weight:700; background:#f8f9fa; }
-    .thumb { display:inline-grid; grid-template-columns: repeat(5, 16px); gap:2px; }
-    .thumb .cell { width:16px; height:16px; font-size:8px; border-radius:3px; padding:0; display:flex; align-items:center; justify-content:center; }
-    .route-item { cursor:pointer; }
-    .screenshot { max-width:260px; border:1px solid #ddd; border-radius:6px; }
-    .spinner { width:1.2rem; height:1.2rem; border-width: .2rem; }
-    .muted-small { font-size:0.85rem; color:#666; }
-    .badge-count { font-size:0.75rem; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="d-flex align-items-start mb-3">
-      <div class="me-auto">
-        <h3>Knight's Tour 5×5 — Clustered Generator & Viewer</h3>
-        <div class="muted-small">Generator berjalan di browser menggunakan Warnsdorff-ordered backtracking + canonicalisasi D8. Pilih kelompok, pilih rute, lihat pola 5×5.</div>
-      </div>
-      <div class="ms-3 text-end">
-        <img src="/mnt/data/361951fb-d8cd-442c-89ab-e36ad2c72116.png" alt="screenshot" class="screenshot">
-        <div class="muted-small mt-1">Contoh screenshot</div>
-      </div>
-    </div>
-
-    <div class="row g-3">
-      <div class="col-md-4">
-        <div class="card p-3 mb-3">
-          <div class="mb-2">
-            <label class="form-label">Kelompok Formasi</label>
-            <select id="groupSelect" class="form-select">
-              <option value="">-- Pilih kelompok --</option>
-              <option value="corner">Corner (sudut)</option>
-              <option value="mid_edge">Mid-edge (tepi tengah)</option>
-              <option value="mid_corner">Mid-corner (dekat sudut)</option>
-              <option value="center">Center (tengah)</option>
-            </select>
-          </div>
-
-          <div class="mb-2">
-            <button id="generateBtn" class="btn btn-primary w-100">Generate Semua Formasi (di browser)</button>
-          </div>
-
-          <div class="mb-2">
-            <div id="progressArea" style="min-height:34px;">
-              <div id="statusText" class="muted-small">Belum digenerate.</div>
-            </div>
-          </div>
-
-          <div id="routeList" class="list-group" style="max-height:520px; overflow:auto;"></div>
-        </div>
-
-        <div class="muted-small">Catatan: setelah generate selesai, Anda dapat memilih kelompok dan rute, lalu klik <b>Download JSON</b> untuk menyimpan hasil.</div>
-      </div>
-
-      <div class="col-md-8">
-        <div class="card p-3">
-          <div class="d-flex mb-2 align-items-center">
-            <h5 id="routeTitle" class="me-auto">Pilih rute...</h5>
-            <div id="countsTag" class="text-end muted-small"></div>
-          </div>
-
-          <div id="grid" class="grid mb-3"></div>
-
-          <div class="d-flex gap-2">
-            <button id="prevBtn" class="btn btn-outline-primary" disabled>Prev</button>
-            <button id="nextBtn" class="btn btn-outline-primary" disabled>Next</button>
-            <button id="downloadBtn" class="btn btn-success ms-auto" disabled>Download JSON</button>
-          </div>
-
-        </div>
-      </div>
-    </div>
-
-    <footer class="mt-3 text-muted">Built: local browser generator</footer>
-  </div>
-
-<script>
-/*
-  Client-side generator + viewer.
-
-  - Generates all knight's tours on 5x5 using Warnsdorff-ordered backtracking.
-  - Canonicalizes with 8 dihedral transforms to eliminate symmetries.
-  - Clusters into 4 groups: corner, mid_edge, mid_corner, center.
-  - Renders UI with Bootstrap.
-*/
-
-(() => {
-  const N = 5;
-  const moves = [[2,1],[1,2],[-1,2],[-2,1],[-2,-1],[-1,-2],[1,-2],[2,-1]];
-  const neighbors = {};
-  for (let x=0;x<N;x++){
-    for (let y=0;y<N;y++){
-      const key = `${x},${y}`;
-      neighbors[key] = [];
-      for (const [dx,dy] of moves) {
-        const nx = x+dx, ny = y+dy;
-        if (nx>=0 && nx<N && ny>=0 && ny<N) neighbors[key].push([nx,ny]);
-      }
-    }
-  }
-
-  // dihedral transforms: 8 functions mapping (x,y) -> (nx,ny)
-  function transformPoint(x,y, t) {
-    if (t===0) return [x,y];
-    if (t===1) return [y, N-1-x];
-    if (t===2) return [N-1-x, N-1-y];
-    if (t===3) return [N-1-y, x];
-    if (t===4) return [x, N-1-y];
-    if (t===5) return [N-1-y, N-1-x];
-    if (t===6) return [N-1-x, y];
-    if (t===7) return [y, x];
-    return [x,y];
-  }
-
-  function canonicalKey(tour) {
-    // tour: array of [x,y] length 25
-    let best = null;
-    for (let t=0;t<8;t++){
-      const flat = [];
-      for (let i=0;i<tour.length;i++){
-        const [x,y] = tour[i];
-        const [nx,ny] = transformPoint(x,y,t);
-        flat.push(nx,ny);
-      }
-      const s = flat.join(',');
-      if (best===null || s < best) best = s;
-    }
-    return best;
-  }
-
-  // Warnsdorff onward degree
-  function onwardDegree(x,y, visited) {
-    let cnt = 0;
-    for (const [nx,ny] of neighbors[`${x},${y}`]) {
-      if (!visited[nx][ny]) cnt++;
-    }
-    return cnt;
-  }
-
-  // classify group by starting square (1-index)
-  function classifyTour(tour) {
-    const [x0,y0] = tour[0];
-    const r = x0+1, c = y0+1;
-    const corner = [[1,1],[1,5],[5,1],[5,5]].map(x=>x.join(','));
-    const mid_edge = [[1,3],[3,1],[3,5],[5,3]].map(x=>x.join(','));
-    const mid_corner = [[2,2],[2,4],[4,2],[4,4]].map(x=>x.join(','));
-    if (corner.includes([r,c].join(','))) return 'corner';
-    if (mid_edge.includes([r,c].join(','))) return 'mid_edge';
-    if (mid_corner.includes([r,c].join(','))) return 'mid_corner';
-    if (r===3 && c===3) return 'center';
-    return 'other';
-  }
-
-  // build matrix 5x5 from tour
-  function tourToMatrix(tour) {
-    const mat = Array.from({length:N}, ()=>Array.from({length:N}, ()=>0));
-    for (let i=0;i<tour.length;i++){
-      const [x,y] = tour[i];
-      mat[x][y] = i+1;
-    }
-    return mat;
-  }
-
-  // DOM elements
-  const generateBtn = document.getElementById('generateBtn');
-  const statusText = document.getElementById('statusText');
-  const groupSelect = document.getElementById('groupSelect');
-  const routeList = document.getElementById('routeList');
-  const routeTitle = document.getElementById('routeTitle');
-  const grid = document.getElementById('grid');
-  const prevBtn = document.getElementById('prevBtn');
-  const nextBtn = document.getElementById('nextBtn');
-  const downloadBtn = document.getElementById('downloadBtn');
-  const countsTag = document.getElementById('countsTag');
-
-  let groups = {corner:[], mid_edge:[], mid_corner:[], center:[]};
-  let canonicalSet = new Set();
-  let currentGroup = null, currentIndex = 0;
-
-  function renderGrid(mat) {
-    grid.innerHTML = '';
-    for (let i=0;i<N;i++){
-      for (let j=0;j<N;j++){
-        const d = document.createElement('div');
-        d.className = 'cell';
-        d.textContent = mat[i][j] || '';
-        grid.appendChild(d);
-      }
-    }
-  }
-
-  function buildRouteList(key) {
-    routeList.innerHTML = '';
-    if (!groups[key]) return;
-    groups[key].forEach((entry, idx) => {
-      const a = document.createElement('a');
-      a.href = '#';
-      a.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center route-item';
-      a.dataset.idx = idx;
-      a.innerHTML = `<div>Rute ${entry.id}</div><div class="thumb"></div>`;
-      const thumb = a.querySelector('.thumb');
-      for (let i=0;i<N;i++){
-        for (let j=0;j<N;j++){
-          const c = document.createElement('div');
-          c.className = 'cell';
-          c.style.fontSize='6px';
-          c.style.width='16px';
-          c.style.height='16px';
-          c.style.padding='0';
-          c.style.border='1px solid #ccc';
-          c.style.background='#fff';
-          const v = entry.matrix[i][j];
-          c.textContent = v>0?Math.min(9,v):'';
-          thumb.appendChild(c);
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Viewer 1728 Knight 5x5 Routes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #board {
+            display: grid;
+            grid-template-columns: repeat(5, var(--cell-size, 60px));
+            grid-template-rows: repeat(5, var(--cell-size, 60px));
+            gap: 4px;
         }
-      }
-      a.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        currentGroup = key;
-        currentIndex = idx;
-        showRoute(key, idx);
-      });
-      routeList.appendChild(a);
-    });
-  }
 
-  function showRoute(key, idx) {
-    const entry = groups[key][idx];
-    routeTitle.textContent = `Kelompok: ${key} — Rute ${entry.id}`;
-    renderGrid(entry.matrix);
-    prevBtn.disabled = (idx<=0);
-    nextBtn.disabled = (idx >= groups[key].length-1);
-  }
+        .cell {
+            width: var(--cell-size, 60px);
+            height: var(--cell-size, 60px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: bold;
+            border-radius: 6px;
+            transition: transform 120ms linear, box-shadow 120ms linear, opacity 160ms linear;
+        }
 
-  prevBtn.addEventListener('click', ()=> {
-    if (!currentGroup) return;
-    if (currentIndex>0){ currentIndex--; showRoute(currentGroup, currentIndex); }
-  });
-  nextBtn.addEventListener('click', ()=> {
-    if (!currentGroup) return;
-    if (currentIndex < groups[currentGroup].length-1){ currentIndex++; showRoute(currentGroup, currentIndex); }
-  });
+        /* Board palette: dark and light greys for chessboard */
+        .dark {
+            background: #2f2f2f;
+            /* dark grey */
+            color: #ffffff;
+        }
 
-  downloadBtn.addEventListener('click', ()=> {
-    const data = JSON.stringify(groups, null, 2);
-    const blob = new Blob([data], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'knight5x5_clustered_480.json';
-    a.click();
-  });
+        .light {
+            background: #e6e6e6;
+            /* light grey */
+            color: #111111;
+        }
 
-  groupSelect.addEventListener('change', (ev) => {
-    const key = ev.target.value;
-    if (!key) return;
-    if (groups[key].length===0) {
-      routeList.innerHTML = '<div class="p-2 text-muted">Belum ada rute (silakan klik Generate).</div>';
-      countsTag.textContent = '';
-      return;
-    }
-    buildRouteList(key);
-    countsTag.textContent = `${groups[key].length} rute`;
-  });
+        .cell.highlight {
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.4);
+            transform: scale(1.06);
+        }
 
-  // generator engine using async chunks (to keep UI responsive)
-  generateBtn.addEventListener('click', async () => {
-    generateBtn.disabled = true;
-    statusText.textContent = 'Memulai generasi...';
-    canonicalSet = new Set();
-    groups = {corner:[], mid_edge:[], mid_corner:[], center:[]};
-    let idCounters = {corner:0, mid_edge:0, mid_corner:0, center:0};
+        .cell.trace {
+            opacity: 0.85;
+            filter: saturate(1.2) brightness(1.05);
+            outline: 2px solid rgba(255, 255, 0, 0.08);
+        }
 
-    // visited as array, tour as array
-    let visited = Array.from({length:N}, ()=>Array.from({length:N}, ()=>false));
-    let tour = [];
+        .cell.upcoming {
+            opacity: 0.92;
+            filter: saturate(0.9) brightness(0.98);
+        }
 
-    // We'll iterate start squares 0..24 and run DFS; use await-yield to allow UI painting
-    const starts = [];
-    for (let i=0;i<N;i++) for (let j=0;j<N;j++) starts.push([i,j]);
-
-    let totalStarts = starts.length;
-    let completedStarts = 0;
-    const t0 = performance.now();
-
-    // Use recursion but periodically yield to event loop by wrapping in Promise+setTimeout when deep loops
-    async function runFrom(startX, startY) {
-      visited = Array.from({length:N}, ()=>Array.from({length:N}, ()=>false));
-      tour = [[startX,startY]];
-      visited[startX][startY] = true;
-
-      function dfs(x,y,step) {
-        if (step === N*N) {
-          // canonicalize and store unique
-          const key = canonicalKey(tour);
-          if (!canonicalSet.has(key)) {
-            canonicalSet.add(key);
-            // pick representative matrix (tour as-is)
-            const grp = classifyTour(tour);
-            if (['corner','mid_edge','mid_corner','center'].includes(grp)) {
-              idCounters[grp] += 1;
-              groups[grp].push({id: idCounters[grp], matrix: tourToMatrix(tour)});
+        /* Mobile responsiveness */
+        @media (max-width: 480px) {
+            :root {
+                --cell-size: 12vw;
             }
-          }
-          return;
+
+            /* make layout vertically centered and readable on phones */
+            .container.py-4 {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .col-md-4 {
+                order: 2;
+                width: 100% !important;
+                max-width: 480px;
+            }
+
+            .col-md-8 {
+                order: 1;
+                width: 100% !important;
+                max-width: 480px;
+            }
+
+            .cell {
+                font-size: 4.5vw;
+            }
+
+            #board {
+                gap: 3px;
+                margin: 0.6rem auto;
+            }
+
+            /* make controls easier to tap on small screens */
+            .d-flex.gap-2 {
+                gap: .5rem !important;
+            }
+
+            .btn {
+                font-size: 16px;
+                padding: .5rem 0.6rem;
+            }
+
+            .input-group .form-control {
+                font-size: 16px;
+            }
+
+            #routeInfo {
+                font-size: 13px;
+                text-align: center;
+            }
         }
-        // generate candidates with onward degree
-        const cands = [];
-        for (const [nx,ny] of neighbors[`${x},${y}`]) {
-          if (!visited[nx][ny]) {
-            cands.push([onwardDegree(nx,ny,visited), nx, ny]);
-          }
+
+        @media (min-width: 481px) and (max-width: 768px) {
+            :root {
+                --cell-size: 40px;
+            }
+
+            .cell {
+                font-size: 16px;
+            }
         }
-        cands.sort((a,b)=>a[0]-b[0]);
-        for (const [, nx, ny] of cands) {
-          visited[nx][ny] = true;
-          tour.push([nx,ny]);
-          dfs(nx,ny,step+1);
-          tour.pop();
-          visited[nx][ny] = false;
+    </style>
+</head>
+
+<body class="bg-dark text-light">
+
+    <div class="container py-4">
+        <h2 class="mb-4 text-warning">Viewer Rute Knight 5×5 (1728 Rute)</h2>
+
+        <div class="row">
+            <div class="col-md-4">
+                <label class="form-label">Pilih Nomor Rute:</label>
+                <div class="d-flex mb-2 gap-2">
+                    <button id="prevBtn" class="btn btn-sm btn-outline-light">◀</button>
+                    <select id="routeSelect" class="form-select form-select-sm flex-grow-1"></select>
+                    <button id="nextBtn" class="btn btn-sm btn-outline-light">▶</button>
+                </div>
+
+                <div class="input-group mb-2">
+                    <span class="input-group-text">#</span>
+                    <input id="routeNumberInput" type="number" class="form-control form-control-sm" min="1"
+                        placeholder="Nomor rute">
+                    <button id="goBtn" class="btn btn-sm btn-outline-light">Go</button>
+                </div>
+
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <button id="playBtn" class="btn btn-sm btn-success">Play</button>
+                    <button id="pauseBtn" class="btn btn-sm btn-secondary" disabled>Pause</button>
+                    <button id="stopBtn" class="btn btn-sm btn-outline-light">Stop</button>
+                    <button id="clearTraceBtn" class="btn btn-sm btn-outline-warning">Clear Trace</button>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label small mb-1">Speed:</label>
+                    <input id="speedRange" type="range" min="50" max="1000" value="400">
+                </div>
+
+                <div class="mb-3 small text-muted" id="routeInfo">-</div>
+
+                <div class="legend d-flex align-items-center small text-muted mb-3">
+                    <span class="me-3" style="display:inline-flex;align-items:center;gap:8px">
+                        <span
+                            style="width:14px;height:14px;border-radius:3px;display:inline-block;background:rgba(255,159,28,0.9);border:1px solid rgba(0,0,0,0.12)"></span>
+                        <span>Jejak — Sudah dilalui</span>
+                    </span>
+                    <span class="me-3" style="display:inline-flex;align-items:center;gap:8px">
+                        <span
+                            style="width:14px;height:14px;border-radius:3px;display:inline-block;background:#00d1ff;border:1px solid rgba(0,0,0,0.06)"></span>
+                        <span>Animasi — Saat ini</span>
+                    </span>
+                    <span style="display:inline-flex;align-items:center;gap:8px">
+                        <span
+                            style="width:14px;height:14px;border-radius:3px;display:inline-block;background:rgba(0,209,255,0.12);border:1px solid rgba(0,0,0,0.04)"></span>
+                        <span>Belum dilalui</span>
+                    </span>
+                </div>
+
+            </div>
+
+            <div class="col-md-8">
+                <h5 class="text-info">Visualisasi Papan</h5>
+                <div id="board"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let DATA = {};
+        let ALL_ROUTES = []; // flattened list of all routes across groups
+        let currentRouteIdx = 0;
+        let isPlaying = false;
+        let playTimer = null;
+        let animationPos = 1;
+
+        function loadJSON() {
+            fetch("knight5x5_full_1728_matrix.json")
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP error ' + r.status);
+                    return r.json();
+                })
+                .then(json => {
+                    DATA = json;
+                    ALL_ROUTES = [];
+
+                    const isRoute = arr => Array.isArray(arr) && arr.length === 5 && arr.every(row => Array.isArray(row) && row.length === 5);
+
+                    if (Array.isArray(json)) {
+                        const looksLikeGroupOfRoutes = json.every(g => Array.isArray(g) && g.every(r => isRoute(r)));
+                        if (looksLikeGroupOfRoutes) {
+                            json.forEach((groupArr, gi) => {
+                                const groupName = 'group_' + gi;
+                                groupArr.forEach(route => ALL_ROUTES.push({ group: groupName, matrix: route }));
+                            });
+                        } else if (json.every(r => isRoute(r))) {
+                            json.forEach((route, idx) => ALL_ROUTES.push({ group: 'all', matrix: route }));
+                        } else {
+                            json.forEach((item, i) => {
+                                if (isRoute(item)) {
+                                    ALL_ROUTES.push({ group: 'item_' + i, matrix: item });
+                                } else if (Array.isArray(item)) {
+                                    item.forEach((sub, j) => { if (isRoute(sub)) ALL_ROUTES.push({ group: 'item_' + i, matrix: sub }); });
+                                }
+                            });
+                        }
+                    } else if (typeof json === 'object' && json !== null) {
+                        for (const grp in json) {
+                            if (Array.isArray(json[grp]) && json[grp].every(r => isRoute(r))) {
+                                json[grp].forEach(route => ALL_ROUTES.push({ group: grp, matrix: route }));
+                            }
+                        }
+                    }
+
+                    const routeSelect = document.getElementById("routeSelect");
+                    routeSelect.innerHTML = "";
+
+                    if (ALL_ROUTES.length === 0) {
+                        routeSelect.disabled = true;
+                        console.error('No routes found in JSON. Check JSON structure or file contents.');
+                        alert('Tidak ada rute terdeteksi di file JSON. Lihat console untuk detail.');
+                        return;
+                    }
+
+                    ALL_ROUTES.forEach((r, idx) => {
+                        let opt = document.createElement("option");
+                        opt.value = idx;
+                        opt.textContent = "Rute #" + (idx + 1) + " (" + r.group + ")";
+                        routeSelect.appendChild(opt);
+                    });
+
+                    // default to first route
+                    selectRouteByIndex(0);
+                    console.log("JSON Loaded, total routes:", ALL_ROUTES.length);
+                })
+                .catch(err => {
+                    console.error('Failed to load JSON:', err);
+                    alert('Gagal memuat JSON: ' + err + '\nJika membuka file langsung (file://), coba jalankan server HTTP lokal seperti `python -m http.server` di folder proyek.');
+                });
         }
-      }
 
-      dfs(startX, startY, 1);
-    }
+        function renderBoard(matrix) {
+            const board = document.getElementById("board");
+            board.innerHTML = "";
 
-    // run starts sequentially but yield occasionally
-    for (const [sx,sy] of starts) {
-      await new Promise((resolve)=> {
-        // small timeout to keep UI responsive
-        setTimeout(async () => {
-          try {
-            await runFrom(sx,sy);
-          } catch(e) { console.error(e); }
-          completedStarts++;
-          statusText.textContent = `Memproses start ${completedStarts}/${totalStarts} — unique canonical so far: ${canonicalSet.size}`;
-          resolve();
-        }, 10);
-      });
-    }
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 5; c++) {
+                    let cell = document.createElement("div");
+                    cell.classList.add("cell");
+                    cell.classList.add((r + c) % 2 === 0 ? "dark" : "light");
+                    const num = matrix[r][c];
+                    cell.textContent = num;
+                    // store row/col and number for animation
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+                    cell.dataset.num = num;
+                    // make sure inline styles are clean when rendering
+                    cell.style.background = '';
+                    cell.style.color = '';
+                    cell.classList.remove('trace', 'highlight');
+                    board.appendChild(cell);
+                }
+            }
+            // clear any previous highlights/traces
+            clearHighlights();
+        }
 
-    const elapsed = ((performance.now() - t0)/1000).toFixed(2);
-    statusText.textContent = `Selesai dalam ${elapsed}s — unique canonical tours: ${canonicalSet.size}`;
-    // sanity: user expected 480 unique canonical tours
-    if (canonicalSet.size !== 480) {
-      statusText.innerHTML += `<br><span class="text-warning">Catatan: ditemukan ${canonicalSet.size} rute unik (target umum: 480). Hasil tetap dapat digunakan.</span>`;
-    } else {
-      statusText.innerHTML += `<br><span class="text-success">Ditemukan 480 rute unik (canonical).</span>`;
-    }
+        function clearHighlights() {
+            document.querySelectorAll('.cell.highlight').forEach(n => {
+                n.classList.remove('highlight');
+                n.style.background = '';
+            });
+        }
 
-    // enable controls
-    downloadBtn.disabled = false;
-    generateBtn.disabled = false;
-    // update counts tag for select (if a group is already chosen)
-    if (groupSelect.value) {
-      countsTag.textContent = `${groups[groupSelect.value].length} rute`;
-      buildRouteList(groupSelect.value);
-    }
-  });
+        function clearTrace() {
+            document.querySelectorAll('.cell.trace, .cell.upcoming').forEach(n => {
+                n.classList.remove('trace', 'upcoming');
+                n.style.background = '';
+                n.style.color = '';
+            });
+        }
 
-  // helper functions used in runFrom (duplicate to keep scope local)
-  function onwardDegree(x,y, visited) {
-    let cnt = 0;
-    for (const [nx,ny] of neighbors[`${x},${y}`]) {
-      if (!visited[nx][ny]) cnt++;
-    }
-    return cnt;
-  }
-  function tourToMatrix(tour) {
-    const mat = Array.from({length:N}, ()=>Array.from({length:N}, ()=>0));
-    for (let i=0;i<tour.length;i++){
-      const [x,y] = tour[i];
-      mat[x][y] = i+1;
-    }
-    return mat;
-  }
-  function canonicalKey(tour) {
-    let best = null;
-    for (let t=0;t<8;t++){
-      const flat = [];
-      for (let i=0;i<tour.length;i++){
-        const [x,y] = tour[i];
-        const [nx,ny] = transformPoint(x,y,t);
-        flat.push(nx,ny);
-      }
-      const s = flat.join(',');
-      if (best===null || s < best) best = s;
-    }
-    return best;
-  }
-  function transformPoint(x,y, t) {
-    if (t===0) return [x,y];
-    if (t===1) return [y, N-1-x];
-    if (t===2) return [N-1-x, N-1-y];
-    if (t===3) return [N-1-y, x];
-    if (t===4) return [x, N-1-y];
-    if (t===5) return [N-1-y, N-1-x];
-    if (t===6) return [N-1-x, y];
-    if (t===7) return [y, x];
-    return [x,y];
-  }
-  function classifyTour(tour) {
-    const [x0,y0] = tour[0];
-    const r = x0+1, c = y0+1;
-    const corner = [[1,1],[1,5],[5,1],[5,5]].map(x=>x.join(','));
-    const mid_edge = [[1,3],[3,1],[3,5],[5,3]].map(x=>x.join(','));
-    const mid_corner = [[2,2],[2,4],[4,2],[4,4]].map(x=>x.join(','));
-    if (corner.includes([r,c].join(','))) return 'corner';
-    if (mid_edge.includes([r,c].join(','))) return 'mid_edge';
-    if (mid_corner.includes([r,c].join(','))) return 'mid_corner';
-    if (r===3 && c===3) return 'center';
-    return 'other';
-  }
+        function colorForStep(i, total) {
+            // Fixed two-color palette: cyan for animation highlight, orange for trace (jejak)
+            const HIGHLIGHT = '#00d1ff'; // bright cyan
+            const TRACE = 'rgba(255,159,28,0.36)'; // translucent orange
+            const UPCOMING = 'rgba(0,209,255,0.10)'; // very faint cyan for upcoming
+            return {
+                highlight: HIGHLIGHT,
+                trace: TRACE,
+                upcoming: UPCOMING
+            };
+        }
 
-  // Expose a final small helper so user can load groups after generation
-  window._knight_groups = groups;
+        function getReadableTextColor(hslString) {
+            // naive luminance check: parse the lightness from hsl(...) and choose black/white text
+            // handle formats: hex (#rrggbb), rgb(a), hsl(a)
+            try {
+                if (!hslString) return '#fff';
+                hslString = hslString.trim();
+                if (hslString.startsWith('hsl')) {
+                    const m = hslString.match(/hsl\((\d+),\s*(\d+)%?,\s*(\d+)%?\)/);
+                    if (m) return (parseInt(m[3], 10) < 55) ? '#fff' : '#000';
+                }
+                if (hslString.startsWith('#')) {
+                    const hex = hslString.slice(1);
+                    const r = parseInt(hex.substring(0, 2), 16);
+                    const g = parseInt(hex.substring(2, 4), 16);
+                    const b = parseInt(hex.substring(4, 6), 16);
+                    // relative luminance
+                    const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+                    return lum > 0.6 ? '#000' : '#fff';
+                }
+                if (hslString.startsWith('rgb')) {
+                    const m = hslString.match(/rgba?\(([^)]+)\)/);
+                    if (m) {
+                        const parts = m[1].split(',').map(p => parseFloat(p));
+                        const r = parts[0], g = parts[1], b = parts[2];
+                        const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+                        return lum > 0.6 ? '#000' : '#fff';
+                    }
+                }
+            } catch (e) { }
+            return '#fff';
+        }
 
-})();
-</script>
+        function selectRouteByIndex(idx) {
+            if (!ALL_ROUTES.length) return;
+            if (idx < 0) idx = ALL_ROUTES.length - 1;
+            if (idx >= ALL_ROUTES.length) idx = 0;
+            currentRouteIdx = idx;
+            const routeSelect = document.getElementById('routeSelect');
+            routeSelect.value = idx;
+            const info = document.getElementById('routeInfo');
+            info.textContent = `Rute ${idx + 1} / ${ALL_ROUTES.length} — group: ${ALL_ROUTES[idx].group}`;
+            document.getElementById('routeNumberInput').value = idx + 1;
+            stopAnimation();
+            clearHighlights();
+            renderBoard(ALL_ROUTES[idx].matrix);
+            // mark upcoming/future steps with faded color so user sees which cells are in the route
+            const { map, nums } = buildPositions(ALL_ROUTES[idx].matrix);
+            nums.forEach((n, i) => {
+                if (map[n]) {
+                    const colors = colorForStep(i, nums.length);
+                    map[n].classList.add('upcoming');
+                    map[n].style.background = colors.upcoming;
+                    // choose readable text color if needed
+                    map[n].style.color = getReadableTextColor(colors.upcoming);
+                }
+            });
+        }
+
+        function buildPositions(matrix) {
+            // returns a map number -> cell element (1..25), if numbers may not be 1..25 we collect sorted numeric keys
+            const map = {};
+            document.querySelectorAll('#board .cell').forEach(cell => {
+                const n = parseInt(cell.dataset.num);
+                if (!isNaN(n)) map[n] = cell;
+            });
+            // get sorted keys
+            const nums = Object.keys(map).map(n => parseInt(n)).sort((a, b) => a - b);
+            return { map, nums };
+        }
+
+        function playAnimation() {
+            if (isPlaying) return;
+            const speed = parseInt(document.getElementById('speedRange').value) || 400;
+            const { map, nums } = buildPositions(ALL_ROUTES[currentRouteIdx].matrix);
+            if (!nums || nums.length === 0) return;
+            isPlaying = true;
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            animationPos = 0;
+
+            playTimer = setInterval(() => {
+                if (animationPos > 0) {
+                    // mark previous as trace with color
+                    const prevNum = nums[animationPos - 1];
+                    if (map[prevNum]) {
+                        const colors = colorForStep(animationPos - 1, nums.length);
+                        map[prevNum].style.background = colors.trace;
+                        map[prevNum].classList.add('trace');
+                        map[prevNum].classList.remove('upcoming');
+                    }
+                }
+                if (animationPos >= nums.length) {
+                    stopAnimation();
+                    return;
+                }
+                // remove highlight from all, then highlight current with color
+                clearHighlights();
+                const curNum = nums[animationPos];
+                if (map[curNum]) {
+                    const colors = colorForStep(animationPos, nums.length);
+                    map[curNum].style.background = colors.highlight;
+                    map[curNum].classList.add('highlight');
+                    map[curNum].classList.remove('upcoming');
+                    // ensure text remains readable
+                    map[curNum].style.color = getReadableTextColor(colors.highlight);
+                }
+                animationPos++;
+            }, speed);
+        }
+
+        function pauseAnimation() {
+            if (!isPlaying) return;
+            clearInterval(playTimer);
+            playTimer = null;
+            isPlaying = false;
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+        }
+
+        function stopAnimation() {
+            if (playTimer) clearInterval(playTimer);
+            playTimer = null;
+            isPlaying = false;
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            clearHighlights();
+        }
+
+        // wire up controls
+        document.addEventListener('click', (ev) => {
+            // nothing here now
+        });
+
+        document.getElementById('routeSelect').addEventListener('change', function () {
+            const idx = parseInt(this.value);
+            if (isNaN(idx) || !ALL_ROUTES[idx]) return;
+            selectRouteByIndex(idx);
+        });
+
+        document.getElementById('prevBtn').addEventListener('click', () => selectRouteByIndex(currentRouteIdx - 1));
+        document.getElementById('nextBtn').addEventListener('click', () => selectRouteByIndex(currentRouteIdx + 1));
+
+        document.getElementById('goBtn').addEventListener('click', () => {
+            const v = parseInt(document.getElementById('routeNumberInput').value);
+            if (isNaN(v)) return;
+            selectRouteByIndex(v - 1);
+        });
+
+        document.getElementById('routeNumberInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const v = parseInt(e.target.value);
+                if (!isNaN(v)) selectRouteByIndex(v - 1);
+            }
+        });
+
+        document.getElementById('playBtn').addEventListener('click', () => playAnimation());
+        document.getElementById('pauseBtn').addEventListener('click', () => pauseAnimation());
+        document.getElementById('stopBtn').addEventListener('click', () => stopAnimation());
+        document.getElementById('clearTraceBtn').addEventListener('click', () => clearTrace());
+
+        // when speed changes, if playing restart interval with new speed
+        document.getElementById('speedRange').addEventListener('input', () => {
+            if (isPlaying) {
+                pauseAnimation();
+                playAnimation();
+            }
+        });
+
+        // init
+        loadJSON();
+    </script>
 
 </body>
+
 </html>

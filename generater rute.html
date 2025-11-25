@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Generate knight5x5_full_1728_matrix.json (client-side)</title>
+    <style>
+        body {
+            font-family: system-ui;
+            padding: 18px;
+        }
+
+        button {
+            font-size: 16px;
+            padding: 10px 14px;
+        }
+
+        pre {
+            background: #f3f3f3;
+            padding: 10px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Generate knight5x5_full_1728_matrix.json (Client-side)</h2>
+    <p>Browser akan menghitung semua 1728 rute dan men-trigger unduhan file JSON.</p>
+    <button id="btn">Generate & Download JSON</button>
+    <p id="log"></p>
+
+    <script>
+        const N = 5;
+        const TOTAL = N * N;
+        const moves = [[2, 1], [1, 2], [-1, 2], [-2, 1], [-2, -1], [-1, -2], [1, -2], [2, -1]];
+        const neighbors = {};
+        for (let x = 0; x < N; x++) {
+            for (let y = 0; y < N; y++) {
+                const k = `${x},${y}`;
+                neighbors[k] = [];
+                for (const [dx, dy] of moves) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && nx < N && ny >= 0 && ny < N) neighbors[k].push([nx, ny]);
+                }
+            }
+        }
+
+        function onwardDegree(x, y, visited) {
+            let c = 0;
+            for (const [nx, ny] of neighbors[`${x},${y}`]) if (!visited[nx][ny]) c++;
+            return c;
+        }
+
+        function matrixFromTour(tour) {
+            const mat = Array.from({ length: N }, () => Array.from({ length: N }, () => 0));
+            for (let i = 0; i < tour.length; i++) {
+                const [x, y] = tour[i];
+                mat[x][y] = i + 1;
+            }
+            return mat;
+        }
+
+        document.getElementById('btn').addEventListener('click', async () => {
+            const log = (s) => document.getElementById('log').textContent = s;
+            log('Memulai generasi — mohon tunggu...');
+
+            const allMatrices = [];
+            // generate from all starts
+            for (let sx = 0; sx < N; sx++) {
+                for (let sy = 0; sy < N; sy++) {
+                    const visited = Array.from({ length: N }, () => Array.from({ length: N }, () => false));
+                    const tour = [[sx, sy]];
+                    visited[sx][sy] = true;
+
+                    function dfs(x, y, step) {
+                        if (step === TOTAL) {
+                            allMatrices.push(matrixFromTour(tour));
+                            return;
+                        }
+                        const cands = [];
+                        for (const [nx, ny] of neighbors[`${x},${y}`]) {
+                            if (!visited[nx][ny]) cands.push([onwardDegree(nx, ny, visited), nx, ny]);
+                        }
+                        cands.sort((a, b) => a[0] - b[0]);
+                        for (const [, nx, ny] of cands) {
+                            visited[nx][ny] = true;
+                            tour.push([nx, ny]);
+                            dfs(nx, ny, step + 1);
+                            tour.pop();
+                            visited[nx][ny] = false;
+                        }
+                    }
+
+                    dfs(sx, sy, 1);
+                    log(`Done start (${sx},${sy}) — collected ${allMatrices.length} tours so far`);
+                    // give browser a moment to update UI
+                    await new Promise(r => setTimeout(r, 10));
+                }
+            }
+
+            log('Selesai. Menyiapkan file unduhan...');
+            const blob = new Blob([JSON.stringify(allMatrices, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'knight5x5_full_1728_matrix.json';
+            a.click();
+            log('Download dimulai. File: knight5x5_full_1728_matrix.json');
+        });
+    </script>
+</body>
+
+</html>
